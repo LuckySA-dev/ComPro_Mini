@@ -1,26 +1,27 @@
 Hotel Key Card System — Summary Report
-Generated At : 2025-09-23 23:58 (+07:00)
+Generated At : 2025-09-29 15:51 (+07:00)
 App Version  : 1.0
 Endianness   : Little-Endian
 Encoding     : UTF-8 (fixed-length)
 
 -----------------------------------------------------------------------------------------------
-RoomID   | Type       | Floor   | Capacity  | MaxCards  | Status    
---------------------------------------------------------------------
-1        | STD        | 2       | 2         | 2         | Occupied  
-2        | DELUXE     | 5       | 3         | 3         | Active    
-3        | SUITE      | 10      | 4         | 4         | Active    
+RoomID   | Type       | Floor   | Capacity  | MaxCards  | Status     | Guest                          | Check-in    
+--------------------------------------------------------------------------------------------------------------------
+1        | STD        | 2       | 2         | 2         | Occupied   | Thunyaluck Suksom              | 1997-11-68  
+2        | DELUXE     | 5       | 3         | 3         | Active     | -                              | -           
+3        | SUITE      | 10      | 4         | 4         | Active     | -                              | -           
+4        | STD        | 1       | 2         | 2         | Active     | -                              | -           
 -----------------------------------------------------------------------------------------------
 
 Summary (เฉพาะห้องสถานะ Active)
-- Total Rooms (records) : 3
-- Active Rooms          : 3
+- Total Rooms (records) : 4
+- Active Rooms          : 4
 - Deleted Rooms         : 0
 - Currently Occupied    : 1
-- Available Now         : 2
+- Available Now         : 3
 - Open Stays            : 1
 
 Rooms by Type (Active only)
 - DELUXE: 1
-- STD: 1
+- STD: 2
 - SUITE: 1
