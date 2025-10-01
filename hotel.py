@@ -403,9 +403,24 @@ class HotelService:
         pos = self.stays.find_first(lambda s: s.stay_id == stay_id)
         if not pos: return False
         idx, st = pos
+        room_id = st.room_id
         st.status = STAY_DELETED
         st.updated_at = now_ts()
         self.stays.update(idx, st)
+        # update room status if there are no other open stays for this room
+        rp = self.rooms.find_first(lambda r: r.room_id == room_id)
+        if rp:
+            # check if any open stay remains for this room
+            has_open = any(
+                s.status == STAY_OPEN and s.room_id == room_id
+                for _, s in self.stays.iter()
+            )
+            if not has_open:
+                r_idx, room = rp
+                if room.status != ROOM_DELETED:
+                    room.status = ROOM_ACTIVE_VACANT
+                    room.updated_at = now_ts()
+                    self.rooms.update(r_idx, room)
         return True
 
     # ---- Queries for View/Report ----
