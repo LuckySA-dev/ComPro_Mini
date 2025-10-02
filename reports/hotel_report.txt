@@ -1,5 +1,5 @@
 Hotel Key Card System — Summary Report
-Generated At : 2025-10-01 06:41 (+07:00)
+Generated At : 2025-10-01 09:21 (+07:00)
 App Version  : 1.0
 Endianness   : Little-Endian
 Encoding     : UTF-8 (fixed-length)
@@ -7,21 +7,22 @@ Encoding     : UTF-8 (fixed-length)
 -----------------------------------------------------------------------------------------------
 RoomID   | Type       | Floor   | Capacity  | MaxCards  | Status     | Guest                          | Check-in    
 --------------------------------------------------------------------------------------------------------------------
-1        | STD        | 2       | 2         | 2         | Occupied   | -                              | -           
+1        | STD        | 2       | 2         | 2         | Deleted    | -                              | -           
 2        | DELUXE     | 5       | 3         | 3         | Active     | -                              | -           
 3        | SUITE      | 10      | 4         | 4         | Active     | -                              | -           
 4        | STD        | 1       | 2         | 2         | Active     | -                              | -           
+5        | DELUXE     | 2       | 2         | 2         | Active     | -                              | -           
 -----------------------------------------------------------------------------------------------
 
 Summary (เฉพาะห้องสถานะ Active)
-- Total Rooms (records) : 4
+- Total Rooms (records) : 5
 - Active Rooms          : 4
-- Deleted Rooms         : 0
-- Currently Occupied    : 1
-- Available Now         : 3
+- Deleted Rooms         : 1
+- Currently Occupied    : 0
+- Available Now         : 4
 - Open Stays            : 0
 
 Rooms by Type (Active only)
-- DELUXE: 1
-- STD: 2
+- DELUXE: 2
+- STD: 1
 - SUITE: 1

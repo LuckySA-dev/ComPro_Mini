@@ -538,7 +538,7 @@ class CLI:
                 return default
             if s.isdigit():
                 return int(s)
-            print("กรุณากรอกตัวเลขให้ถูกต้อง")
+            print("Please enter a valid number")
 
     def main_menu(self):
         while True:
@@ -557,75 +557,149 @@ class CLI:
                 print("Goodbye!")
                 return
             else:
-                print("เมนูไม่ถูกต้อง")
+                print("Invalid menu option")
 
     # ----------------- Add -----------------
     def menu_add(self):
         print("\nAdd: 1) Room  2) Guest  3) Stay(Check-in)")
-        c = input("เลือก: ").strip()
+        c = input("Select: ").strip()
         if c == "1":
+            # Show existing rooms
+            print("\n=== Existing Rooms ===")
+            rooms = self.svc.get_rooms(include_deleted=False)
+            if rooms:
+                headers = ["ID", "ประเภท", "ชั้น", "ความจุ", "จำนวนคีย์การ์ด", "สถานะ"]
+                rows = [self._format_room_row(r) for r in rooms]
+                print(self._format_table(headers, rows))
+            else:
+                print("No rooms in the system yet")
+            
+            print("\n=== Add New Room ===")
             rt = input("Room Type (STD/DELUXE/SUITE/..): ").strip()[:20]
+            if not rt:
+                print("Return to main menu")
+                return
             floor = self.input_int("Floor")
             cap = self.input_int("Capacity")
             mx = self.input_int("Max keycards")
             room = self.svc.add_room(rt, floor, cap, mx)
-            print(f"เพิ่มห้องแล้ว: {room}")
+            print(f"Room added: {room}")
+            
         elif c == "2":
+            # Show existing guests
+            print("\n=== Existing Guests ===")
+            guests = self.svc.get_guests(include_deleted=False)
+            if guests:
+                headers = ["ID", "Full Name", "Phone", "ID Number", "Status"]
+                rows = [self._format_guest_row(g) for g in guests]
+                print(self._format_table(headers, rows))
+            else:
+                print("No guests in the system yet")
+            
+            print("\n=== Add New Guest ===")
             name = input("Full name: ").strip()[:50]
+            if not name:
+                print("Return to main menu")
+                return
             phone = input("Phone: ").strip()[:15]
             idno = input("ID/Passport: ").strip()[:20]
             g = self.svc.add_guest(name, phone, idno)
-            print(f"เพิ่มแขกแล้ว: {g}")
+            print(f"Guest added: {g}")
+            
         elif c == "3":
+            # Show available rooms and active guests
+            print("\n=== Available Rooms ===")
+            available_rooms = [r for r in self.svc.get_rooms(include_deleted=False) 
+                             if r.status == ROOM_ACTIVE_VACANT]
+            if available_rooms:
+                headers = ["ID", "Type", "Floor", "Capacity", "Max Cards"]
+                rows = [[str(r.room_id), r.room_type, str(r.floor), 
+                        str(r.capacity), str(r.max_cards)] for r in available_rooms]
+                print(self._format_table(headers, rows))
+            else:
+                print("No vacant rooms available")
+                return
+            
+            print("\n=== Active Guests ===")
+            active_guests = self.svc.get_guests(include_deleted=False)
+            if active_guests:
+                headers = ["ID", "Full Name", "Phone", "ID Number"]
+                rows = [[str(g.guest_id), g.full_name, g.phone, g.id_no] 
+                       for g in active_guests]
+                print(self._format_table(headers, rows))
+            else:
+                print("No guests in the system")
+                return
+            
+            print("\n=== Perform Check-in ===")
             gid = self.input_int("Guest ID")
             rid = self.input_int("Room ID")
-            date = input("Check-in date (YYYY-MM-DD): ").strip() or datetime.now().strftime("%Y-%m-%d")
-            cards = self.input_int("Cards to issue (<= room.max_cards)", 1)
+            
+            # Validate selected room and guest exist
+            selected_room = next((r for r in available_rooms if r.room_id == rid), None)
+            selected_guest = next((g for g in active_guests if g.guest_id == gid), None)
+            
+            if not selected_room:
+                print("Selected room not found or not available")
+                return
+            if not selected_guest:
+                print("Selected guest not found")
+                return
+            
+            print(f"\nCheck-in Information:")
+            print(f"Room: {selected_room.room_type} (Room {selected_room.room_id}) - Floor {selected_room.floor}")
+            print(f"Guest: {selected_guest.full_name}")
+            print(f"Maximum key cards: {selected_room.max_cards}")
+            
+            date = input("Check-in date (YYYY-MM-DD) [today]: ").strip() or datetime.now().strftime("%Y-%m-%d")
+            cards = self.input_int(f"Cards to issue (1-{selected_room.max_cards})", 1)
+            
             st = self.svc.checkin(gid, rid, date, cards)
             if st:
-                print(f"Check-in สำเร็จ: StayID={st.stay_id}")
+                print(f"Check-in successful: StayID={st.stay_id}")
+                print(f"Room {rid} status changed to 'Occupied'")
             else:
-                print("Check-in ไม่สำเร็จ (ตรวจสอบ Guest/Room/Status/MaxCards)")
+                print("Check-in failed (verify Guest/Room/Status/MaxCards)")
         else:
-            print("กลับเมนูหลัก")
+            print("Return to main menu")
 
     # ----------------- Update -----------------
     def menu_update(self):
         print("\nUpdate: 1) Room  2) Guest  3) Stay(Check-out)")
-        c = input("เลือก: ").strip()
+        c = input("Select: ").strip()
         if c == "1":
-            # แสดงรายการห้องทั้งหมด
-            print("\nรายการห้องทั้งหมด:")
-            print("ID | ประเภท | ชั้น | ความจุ | จำนวนคีย์การ์ด | สถานะ")
+            # Show all rooms
+            print("\nAll Rooms:")
+            print("ID | Type | Floor | Capacity | Max Cards | Status")
             print("-" * 70)
             rooms = self.svc.get_rooms(include_deleted=False)
             for r in rooms:
-                status = "ว่าง" if r.status == ROOM_ACTIVE_VACANT else "ไม่ว่าง" if r.status == ROOM_ACTIVE_OCCUPIED else "ลบแล้ว"
+                status = "Vacant" if r.status == ROOM_ACTIVE_VACANT else "Occupied" if r.status == ROOM_ACTIVE_OCCUPIED else "Deleted"
                 print(f"{r.room_id} | {r.room_type} | {r.floor} | {r.capacity} | {r.max_cards} | {status}")
             print("-" * 70)
 
-            # รับ ID ห้องที่ต้องการแก้ไข
-            rid = self.input_int("\nเลือก Room ID ที่ต้องการแก้ไข")
+            # Get room ID to edit
+            rid = self.input_int("\nSelect Room ID to edit")
             
-            # ค้นหาข้อมูลห้องปัจจุบัน
+            # Find current room data
             current = self.svc.rooms.find_first(lambda r: r.room_id == rid)
             if not current:
-                print("ไม่พบข้อมูลห้อง")
+                print("Room not found")
                 return
 
-            # แสดงข้อมูลปัจจุบัน
+            # Show current data
             _, room = current
-            print(f"\nข้อมูลปัจจุบัน:")
-            print(f"ประเภทห้อง: {room.room_type}")
-            print(f"ชั้น: {room.floor}")
-            print(f"ความจุ: {room.capacity}")
-            print(f"จำนวนคีย์การ์ดสูงสุด: {room.max_cards}")
+            print(f"\nCurrent Information:")
+            print(f"Room Type: {room.room_type}")
+            print(f"Floor: {room.floor}")
+            print(f"Capacity: {room.capacity}")
+            print(f"Max Key Cards: {room.max_cards}")
 
-            print("\nกรุณากรอกข้อมูลใหม่ (เว้นว่างถ้าไม่ต้องการแก้ไข):")
-            rt = input("ประเภทห้อง: ").strip() or room.room_type
-            floor = input("ชั้น: ").strip()
-            cap = input("ความจุ: ").strip()
-            mx = input("จำนวนคีย์การ์ดสูงสุด: ").strip()
+            print("\nEnter new information (leave blank to keep current):")
+            rt = input("Room Type: ").strip() or room.room_type
+            floor = input("Floor: ").strip()
+            cap = input("Capacity: ").strip()
+            mx = input("Max Key Cards: ").strip()
 
             fields = {
                 "room_type": rt[:20],
@@ -636,43 +710,43 @@ class CLI:
 
             upd = self.svc.update_room(rid, **fields)
             if upd:
-                print("\nอัพเดทข้อมูลเรียบร้อย")
-                print(f"ข้อมูลใหม่: {upd}")
+                print("\nData updated successfully")
+                print(f"New information: {upd}")
             else:
-                print("เกิดข้อผิดพลาดในการอัพเดทข้อมูล")
+                print("Error updating data")
 
         elif c == "2":
-            # แสดงรายการแขกทั้งหมด
-            print("\nรายการแขกทั้งหมด:")
-            print("ID | ชื่อ-นามสกุล | เบอร์โทร | เลขบัตรประชาชน/พาสปอร์ต")
+            # Show all guests
+            print("\nAll Guests:")
+            print("ID | Full Name | Phone | ID/Passport")
             print("-" * 70)
             guests = self.svc.get_guests(include_deleted=False)
             for g in guests:
                 print(f"{g.guest_id} | {g.full_name} | {g.phone} | {g.id_no}")
             print("-" * 70)
             
-            # รับ ID แขกที่ต้องการแก้ไข
-            gid = self.input_int("\nเลือก Guest ID ที่ต้องการแก้ไข")
+            # Get guest ID to edit
+            gid = self.input_int("\nSelect Guest ID to edit")
             
-            # ค้นหาข้อมูลแขกปัจจุบัน
+            # Find current guest data
             current = self.svc.guests.find_first(lambda g: g.guest_id == gid)
             if not current:
-                print("ไม่พบข้อมูลแขก")
+                print("Guest not found")
                 return
                 
-            # แสดงข้อมูลปัจจุบัน
+            # Show current data
             _, guest = current
-            print(f"\nข้อมูลปัจจุบัน:")
-            print(f"ชื่อ-นามสกุล: {guest.full_name}")
-            print(f"เบอร์โทร: {guest.phone}")
-            print(f"เลขบัตรประชาชน/พาสปอร์ต: {guest.id_no}")
+            print(f"\nCurrent Information:")
+            print(f"Full Name: {guest.full_name}")
+            print(f"Phone: {guest.phone}")
+            print(f"ID/Passport: {guest.id_no}")
             
-            print("\nกรุณากรอกข้อมูลใหม่ (เว้นว่างถ้าไม่ต้องการแก้ไข):")
-            name = input("ชื่อ-นามสกุล: ").strip() or guest.full_name
-            phone = input("เบอร์โทร: ").strip() or guest.phone
-            idno = input("เลขบัตรประชาชน/พาสปอร์ต: ").strip() or guest.id_no
+            print("\nEnter new information (leave blank to keep current):")
+            name = input("Full Name: ").strip() or guest.full_name
+            phone = input("Phone: ").strip() or guest.phone
+            idno = input("ID/Passport: ").strip() or guest.id_no
             
-            # อัพเดทข้อมูล
+            # Update data
             fields = {
                 "full_name": name[:50],
                 "phone": phone[:15],
@@ -681,14 +755,14 @@ class CLI:
             
             upd = self.svc.update_guest(gid, **fields)
             if upd:
-                print("\nอัพเดทข้อมูลเรียบร้อย")
-                print(f"ข้อมูลใหม่: {upd}")
+                print("\nData updated successfully")
+                print(f"New information: {upd}")
             else:
-                print("เกิดข้อผิดพลาดในการอัพเดทข้อมูล")
+                print("Error updating data")
 
         elif c == "3":
-            # แสดงรายการ stays ที่ยังไม่ได้ check-out
-            print("\nรายการเข้าพักที่ยังไม่ได้ check-out:")
+            # Show stays that haven't checked out yet
+            print("\nStays not yet checked out:")
             print("Stay ID | Room | Guest | Check-in Date")
             print("-" * 70)
             
@@ -702,58 +776,58 @@ class CLI:
                 print(f"{s.stay_id} | {room_type} (Room {s.room_id}) | {guest_name} | {s.checkin_date}")
             print("-" * 70)
 
-            # รับ ID ที่ต้องการ check-out
-            sid = self.input_int("\nเลือก Stay ID ที่ต้องการ check-out")
+            # Get ID for check-out
+            sid = self.input_int("\nSelect Stay ID for check-out")
             
-            # ค้นหา stay ที่ต้องการ
+            # Find the desired stay
             current = self.svc.stays.find_first(lambda s: s.stay_id == sid and s.status == STAY_OPEN)
             if not current:
-                print("ไม่พบการเข้าพักที่ระบุ หรือ check-out ไปแล้ว")
+                print("Stay not found or already checked out")
                 return
 
-            # แสดงข้อมูลและยืนยัน check-out
+            # Show information and confirm check-out
             _, stay = current
             guest_name = guests[stay.guest_id].full_name if stay.guest_id in guests else "Unknown"
             room_type = rooms[stay.room_id].room_type if stay.room_id in rooms else "Unknown"
             
-            print(f"\nข้อมูลการเข้าพัก:")
-            print(f"ห้อง: {room_type} (Room {stay.room_id})")
-            print(f"แขก: {guest_name}")
-            print(f"วันที่ check-in: {stay.checkin_date}")
+            print(f"\nStay Information:")
+            print(f"Room: {room_type} (Room {stay.room_id})")
+            print(f"Guest: {guest_name}")
+            print(f"Check-in date: {stay.checkin_date}")
             
-            confirm = input("\nยืนยันการ check-out (y/N): ").strip().lower()
+            confirm = input("\nConfirm check-out (y/N): ").strip().lower()
             if confirm != 'y':
-                print("ยกเลิกการ check-out")
+                print("Check-out cancelled")
                 return
 
-            date = input("วันที่ check-out (YYYY-MM-DD) [วันนี้]: ").strip() or datetime.now().strftime("%Y-%m-%d")
+            date = input("Check-out date (YYYY-MM-DD) [today]: ").strip() or datetime.now().strftime("%Y-%m-%d")
             if self.svc.checkout(sid, date):
-                print(f"\nCheck-out สำเร็จ")
-                print(f"วันที่ check-out: {date}")
+                print(f"\nCheck-out successful")
+                print(f"Check-out date: {date}")
             else:
-                print("เกิดข้อผิดพลาดในการ check-out")
+                print("Error during check-out")
 
         else:
-            print("กลับเมนูหลัก")
+            print("Return to main menu")
 
     # ----------------- Delete -----------------
     def menu_delete(self):
         print("\nDelete (soft): 1) Room  2) Guest  3) Stay")
-        c = input("เลือก: ").strip()
+        c = input("Select: ").strip()
         if c == "1":
             rid = self.input_int("Room ID")
             ok = self.svc.delete_room(rid)
-            print("ลบแล้ว" if ok else "ไม่พบห้อง")
+            print("Deleted" if ok else "Room not found")
         elif c == "2":
             gid = self.input_int("Guest ID")
             ok = self.svc.delete_guest(gid)
-            print("ลบแล้ว" if ok else "ไม่พบแขก")
+            print("Deleted" if ok else "Guest not found")
         elif c == "3":
             sid = self.input_int("Stay ID")
             ok = self.svc.delete_stay(sid)
-            print("ลบแล้ว" if ok else "ไม่พบ Stay")
+            print("Deleted" if ok else "Stay not found")
         else:
-            print("กลับเมนูหลัก")
+            print("Return to main menu")
 
     # ----------------- View -----------------
     def _format_table(self, headers: List[str], rows: List[List[str]], widths: Optional[List[int]] = None) -> str:
@@ -777,7 +851,7 @@ class CLI:
         return "\n".join([header, separator] + formatted_rows)
 
     def _format_room_row(self, room: Room) -> List[str]:
-        status = "ว่าง" if room.status == ROOM_ACTIVE_VACANT else "ไม่ว่าง" if room.status == ROOM_ACTIVE_OCCUPIED else "ลบแล้ว"
+        status = "Vacant" if room.status == ROOM_ACTIVE_VACANT else "Occupied" if room.status == ROOM_ACTIVE_OCCUPIED else "Deleted"
         return [
             str(room.room_id),
             room.room_type,
@@ -799,7 +873,7 @@ class CLI:
     def _format_stay_row(self, stay: Stay, guests: Dict[int, Guest], rooms: Dict[int, Room]) -> List[str]:
         guest = guests.get(stay.guest_id, None)
         room = rooms.get(stay.room_id, None)
-        status = "เปิด" if stay.status == STAY_OPEN else "ปิด" if stay.status == STAY_CLOSED else "ลบแล้ว"
+        status = "Open" if stay.status == STAY_OPEN else "Closed" if stay.status == STAY_CLOSED else "Deleted"
         return [
             str(stay.stay_id),
             str(stay.room_id),
@@ -815,92 +889,92 @@ class CLI:
     def menu_view(self):
         print(dedent("""
         View:
-          1) ดูรายการเดียว
-          2) ดูทั้งหมด
-          3) ดูแบบกรอง
-          4) สถิติโดยสรุป + Export Report
+          1) View Single Record
+          2) View All Records
+          3) View Filtered Records
+          4) Summary Statistics + Export Report
         """))
-        c = input("เลือก: ").strip()
+        c = input("Select: ").strip()
         if c == "1":
-            sub = input("เลือก: 1) Room  2) Guest  3) Stay : ").strip()
+            sub = input("Select: 1) Room  2) Guest  3) Stay : ").strip()
             if sub == "1":
-                # แสดงรายการห้องทั้งหมดก่อน
-                print("\nรายการห้องทั้งหมด:")
+                # Show all rooms first
+                print("\nAll Rooms:")
                 rooms = self.svc.get_rooms()
-                headers = ["ID", "ประเภท", "ชั้น", "ความจุ", "จำนวนคีย์การ์ด", "สถานะ"]
+                headers = ["ID", "Type", "Floor", "Capacity", "Max Cards", "Status"]
                 rows = [self._format_room_row(r) for r in rooms]
                 print(self._format_table(headers, rows))
                 
-                rid = self.input_int("\nเลือก Room ID ที่ต้องการดู")
+                rid = self.input_int("\nSelect Room ID to view")
                 pos = self.svc.rooms.find_first(lambda r: r.room_id == rid)
                 if pos:
                     _, room = pos
-                    print("\nข้อมูลห้องที่เลือก:")
+                    print("\nSelected Room Information:")
                     print(self._format_table(headers, [self._format_room_row(room)]))
                 else:
-                    print("ไม่พบห้อง")
+                    print("Room not found")
                     
             elif sub == "2":
-                # แสดงรายการแขกทั้งหมด
-                print("\nรายการแขกทั้งหมด:")
+                # Show all guests
+                print("\nAll Guests:")
                 guests = self.svc.get_guests()
-                headers = ["ID", "ชื่อ-นามสกุล", "เบอร์โทร", "เลขประจำตัว", "สถานะ"]
+                headers = ["ID", "Full Name", "Phone", "ID Number", "Status"]
                 rows = [self._format_guest_row(g) for g in guests]
                 print(self._format_table(headers, rows))
                 
-                gid = self.input_int("\nเลือก Guest ID ที่ต้องการดู")
+                gid = self.input_int("\nSelect Guest ID to view")
                 pos = self.svc.guests.find_first(lambda g: g.guest_id == gid)
                 if pos:
                     _, guest = pos
-                    print("\nข้อมูลแขกที่เลือก:")
+                    print("\nSelected Guest Information:")
                     print(self._format_table(headers, [self._format_guest_row(guest)]))
                 else:
-                    print("ไม่พบแขก")
+                    print("Guest not found")
             else:
-                # แสดงรายการเข้าพักทั้งหมด
-                print("\nรายการเข้าพักทั้งหมด:")
+                # Show all stays
+                print("\nAll Stays:")
                 stays = self.svc.get_stays()
                 guests = {g.guest_id: g for g in self.svc.get_guests()}
                 rooms = {r.room_id: r for r in self.svc.get_rooms()}
                 
-                headers = ["StayID", "RoomID", "ประเภทห้อง", "ชื่อแขก", "Check-in", "Check-out", "การ์ดที่ให้", "การ์ดคืน", "สถานะ"]
+                headers = ["StayID", "RoomID", "Room Type", "Guest Name", "Check-in", "Check-out", "Cards Issued", "Cards Returned", "Status"]
                 rows = [self._format_stay_row(s, guests, rooms) for s in stays]
                 print(self._format_table(headers, rows))
                 
-                sid = self.input_int("\nเลือก Stay ID ที่ต้องการดู")
+                sid = self.input_int("\nSelect Stay ID to view")
                 pos = self.svc.stays.find_first(lambda s: s.stay_id == sid)
                 if pos:
                     _, stay = pos
-                    print("\nข้อมูลการเข้าพักที่เลือก:")
+                    print("\nSelected Stay Information:")
                     print(self._format_table(headers, [self._format_stay_row(stay, guests, rooms)]))
                 else:
-                    print("ไม่พบข้อมูลการเข้าพัก")
+                    print("Stay information not found")
                     
         elif c == "2":
-            sub = input("เลือก: 1) Rooms  2) Guests  3) Stays : ").strip()
+            sub = input("Select: 1) Rooms  2) Guests  3) Stays : ").strip()
             if sub == "1":
                 rooms = self.svc.get_rooms()
-                headers = ["ID", "ประเภท", "ชั้น", "ความจุ", "จำนวนคีย์การ์ด", "สถานะ"]
+                headers = ["ID", "Type", "Floor", "Capacity", "Max Cards", "Status"]
                 rows = [self._format_room_row(r) for r in rooms]
-                print("\nรายการห้องทั้งหมด:")
+                print("\nAll Rooms:")
                 print(self._format_table(headers, rows))
             elif sub == "2":
                 guests = self.svc.get_guests()
-                headers = ["ID", "ชื่อ-นามสกุล", "เบอร์โทร", "เลขประจำตัว", "สถานะ"]
+                headers = ["ID", "Full Name", "Phone", "ID Number", "Status"]
                 rows = [self._format_guest_row(g) for g in guests]
-                print("\nรายการแขกทั้งหมด:")
+                print("\nAll Guests:")
                 print(self._format_table(headers, rows))
             else:
                 stays = self.svc.get_stays()
                 guests = {g.guest_id: g for g in self.svc.get_guests()}
                 rooms = {r.room_id: r for r in self.svc.get_rooms()}
-                headers = ["StayID", "RoomID", "ประเภทห้อง", "ชื่อแขก", "Check-in", "Check-out", "การ์ดที่ให้", "การ์ดคืน", "สถานะ"]
+                headers = ["StayID", "RoomID", "Room Type", "Guest Name", "Check-in", "Check-out", "Cards Issued", "Cards Returned", "Status"]
                 rows = [self._format_stay_row(s, guests, rooms) for s in stays]
-                print("\nรายการเข้าพักทั้งหมด:")
+                print("\nAll Stays:")
                 print(self._format_table(headers, rows))
         elif c == "3":
-            print("กรองห้อง: 1) เฉพาะว่าง  2) เฉพาะไม่ว่าง  3) ตาม Type")
-            sub = input("เลือก: ").strip()
+            print("Filter Rooms: 1) Vacant Only  2) Occupied Only  3) By Type")
+            sub = input("Select: ").strip()
             rooms = self.svc.get_rooms(include_deleted=False)
             if sub == "1":
                 rooms = [r for r in rooms if r.status == ROOM_ACTIVE_VACANT]
@@ -915,97 +989,70 @@ class CLI:
             path = os.path.join(REPORT_DIR, "hotel_report.txt")
             rep = Report(self.svc)
             rep.save(path)
-            print(f"Export เรียบร้อย → {path}")
-            print("\nตัวอย่างส่วนหัวรายงาน:\n")
+            print(f"Export successful → {path}")
+            print("\nReport header preview:\n")
             print(rep.build_text().split("\n", 8)[0:8])
         else:
-            print("กลับเมนูหลัก")
+            print("Return to main menu")
 
 # ----------------------------- Entry Point ------------------------------------
 
 def seed_example_data(svc: HotelService):
-    """ใส่ข้อมูลตัวอย่างเพื่อทดสอบ (เรียกด้วย --seed)"""
+    """Insert sample data for testing (call with --seed)"""
     try:
-        # เพิ่มห้องพักหลากหลายประเภท
+        # Add various room types
         if len(list(svc.rooms.iter())) == 0:
-            print("กำลังเพิ่มข้อมูลห้องพัก...")
+            print("Adding room data...")
             # Standard Rooms
             svc.add_room("STD", 2, 2, 2)
             # Deluxe Room
             svc.add_room("DELUXE", 5, 3, 3)
             # Suite
             svc.add_room("SUITE", 10, 4, 4)
-            print("เพิ่มห้องพักเรียบร้อย")
+            print("Room data added successfully")
 
-        # เพิ่มข้อมูลแขก
+        # Add guest data
         if len(list(svc.guests.iter())) == 0:
-            print("กำลังเพิ่มข้อมูลแขก...")
+            print("Adding guest data...")
             svc.add_guest("John Smith", "0812345678", "A1234567890")
             svc.add_guest("Jane Doe", "0899999999", "B9876543210")
-            print("เพิ่มข้อมูลแขกเรียบร้อย")
+            print("Guest data added successfully")
 
-        # ทำ check-in ตัวอย่าง
+        # Perform sample check-in
         rooms = svc.get_rooms()
         guests = svc.get_guests()
         if rooms and guests and len(list(svc.stays.iter())) == 0:
-            print("กำลังทำ check-in ตัวอย่าง...")
+            print("Performing sample check-in...")
             # Check-in guest to STD room
             svc.checkin(guests[0].guest_id, rooms[0].room_id, 
                        datetime.now().strftime("%Y-%m-%d"), 1)
-            print("ทำ check-in เรียบร้อย")
+            print("Check-in completed successfully")
             
     except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการเพิ่มข้อมูลตัวอย่าง: {str(e)}")
+        print(f"Error adding sample data: {str(e)}")
         return False
     
     return True
 
-    # เพิ่มข้อมูลแขก
-    if len(list(svc.guests.iter())) == 0:
-        svc.add_guest("Alice Wonderland", "0812345678", "A1234567890")
-        svc.add_guest("Bob Builder", "0899999999", "B9876543210")
-        svc.add_guest("Charlie Chan", "0823456789", "C2345678901")
-        svc.add_guest("David Smith", "0834567890", "D3456789012")
-        svc.add_guest("Emma Watson", "0845678901", "E4567890123")
-        svc.add_guest("Frank Wilson", "0856789012", "F5678901234")
-
-    # ทำ check-in ตัวอย่าง
-    rooms = svc.get_rooms()
-    guests = svc.get_guests()
-    if rooms and guests:
-        # Check-in Alice to STD room
-        svc.checkin(guests[0].guest_id, rooms[0].room_id, datetime.now().strftime("%Y-%m-%d"), 1)
-        # Check-in Bob to DELUXE room
-        svc.checkin(guests[1].guest_id, rooms[3].room_id, datetime.now().strftime("%Y-%m-%d"), 2)
-        # Check-in Charlie to SUITE
-        svc.checkin(guests[2].guest_id, rooms[6].room_id, datetime.now().strftime("%Y-%m-%d"), 3)
-        
-        # Checkout Bob (to show history)
-        stays = svc.get_stays()
-        for stay in stays:
-            if stay.guest_id == guests[1].guest_id:
-                checkout_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-                svc.checkout(stay.stay_id, checkout_date)
-
 def main():
     try:
         parser = argparse.ArgumentParser(description="Hotel Key Card CLI (Binary struct / OOP)")
-        parser.add_argument("--seed", action="store_true", help="เติมข้อมูลตัวอย่าง")
+        parser.add_argument("--seed", action="store_true", help="Add sample data")
         args = parser.parse_args()
 
         svc = HotelService()
         if args.seed:
             if seed_example_data(svc):
-                print("\nเพิ่มข้อมูลตัวอย่างเรียบร้อย")
+                print("\nSample data added successfully")
             else:
-                print("\nเกิดข้อผิดพลาดในการเพิ่มข้อมูลตัวอย่าง")
+                print("\nError adding sample data")
                 return
 
         CLI(svc).main_menu()
     except KeyboardInterrupt:
-        print("\nจบการทำงาน")
+        print("\nProgram terminated")
     except Exception as e:
-        print(f"\nเกิดข้อผิดพลาด: {str(e)}")
+        print(f"\nError occurred: {str(e)}")
         raise
 
 if __name__ == "__main__":
