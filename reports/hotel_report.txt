@@ -1,28 +1,37 @@
 Hotel Key Card System — Summary Report
-Generated At : 2025-10-01 09:21 (+07:00)
+Generated At : 2025-10-02 10:57 (+07:00)
 App Version  : 1.0
 Endianness   : Little-Endian
 Encoding     : UTF-8 (fixed-length)
 
 -----------------------------------------------------------------------------------------------
-RoomID   | Type       | Floor   | Capacity  | MaxCards  | Status     | Guest                          | Check-in    
---------------------------------------------------------------------------------------------------------------------
-1        | STD        | 2       | 2         | 2         | Deleted    | -                              | -           
-2        | DELUXE     | 5       | 3         | 3         | Active     | -                              | -           
-3        | SUITE      | 10      | 4         | 4         | Active     | -                              | -           
-4        | STD        | 1       | 2         | 2         | Active     | -                              | -           
-5        | DELUXE     | 2       | 2         | 2         | Active     | -                              | -           
+RoomID   | Type       | Floor   | Capacity  | MaxCards  | Status     | Guest                     | Phone           | ID Number       | Keycard Serials      | Check-in    
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+1        | STD        | 2       | 2         | 2         | Deleted    | -                         | -               | -               | -                    | -           
+2        | DELUXE     | 5       | 3         | 3         | Occupied   | -                         | -               | -               | -                    | -           
+3        | SUITE      | 10      | 4         | 4         | Active     | -                         | -               | -               | -                    | -           
+4        | STD        | 1       | 2         | 2         | Active     | -                         | -               | -               | -                    | -           
+5        | DELUXE     | 2       | 2         | 2         | Active     | -                         | -               | -               | -                    | -           
+6        | STD        | 1       | 10        | 2         | Active     | -                         | -               | -               | -                    | -           
+7        | STD        | 2       | 2         | 2         | Active     | -                         | -               | -               | -                    | -           
+8        | DELUXE     | 5       | 3         | 3         | Occupied   | Jane Doe                  | 0899999999      | B9876543210     | KC00800655           | 2024-01-16  
+9        | STD        | 2       | 2         | 2         | Occupied   | John Smith                | 0812345678      | A1234567890     | KC00900755, KC00900755 | 2024-01-15  
+10       | DELUXE     | 5       | 3         | 3         | Occupied   | Jane Doe                  | 0899999999      | B9876543210     | KC01000855           | 2024-01-16  
+11       | STD        | 2       | 2         | 2         | Occupied   | John Smith                | 0812345678      | A1234567890     | KC01100962, KC01100962 | 2024-01-15  
+12       | DELUXE     | 5       | 3         | 3         | Occupied   | Jane Doe                  | 0899999999      | B9876543210     | KC01201062           | 2024-01-16  
+13       | STD        | 2       | 2         | 2         | Occupied   | John Smith                | 0812345678      | A1234567890     | KC01301163, KC01301163 | 2024-01-15  
+14       | DELUXE     | 5       | 3         | 3         | Occupied   | Jane Doe                  | 0899999999      | B9876543210     | KC01401263           | 2024-01-16  
 -----------------------------------------------------------------------------------------------
 
 Summary (เฉพาะห้องสถานะ Active)
-- Total Rooms (records) : 5
-- Active Rooms          : 4
+- Total Rooms (records) : 14
+- Active Rooms          : 13
 - Deleted Rooms         : 1
-- Currently Occupied    : 0
-- Available Now         : 4
-- Open Stays            : 0
+- Currently Occupied    : 8
+- Available Now         : 5
+- Open Stays            : 7
 
 Rooms by Type (Active only)
-- DELUXE: 2
-- STD: 1
+- DELUXE: 6
+- STD: 6
 - SUITE: 1

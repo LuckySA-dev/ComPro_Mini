@@ -8,6 +8,7 @@ Files (fixed-length, little-endian '<'):
   data/rooms.dat   : master rooms
   data/guests.dat  : master guests
   data/stays.dat   : master stays (การเข้าพัก: Guest x Room)
+  data/keycards.dat: master keycards
 
 Report (text):
   reports/hotel_report.txt
@@ -66,6 +67,11 @@ GUEST_SIZE = 112
 STAY_STRUCT = struct.Struct("<IIII10s10sIII")
 STAY_SIZE = 64
 
+# Keycard record (32 bytes)
+# <III10sII -> 4+4+4+10+4+4 = 30 (pad 32)
+KEYCARD_STRUCT = struct.Struct("<III10sII")
+KEYCARD_SIZE = 32
+
 # Status constants
 ROOM_DELETED = 0
 ROOM_ACTIVE_VACANT = 1
@@ -77,6 +83,9 @@ GUEST_ACTIVE = 1
 STAY_DELETED = 9
 STAY_OPEN = 1
 STAY_CLOSED = 0
+
+KEYCARD_DELETED = 0
+KEYCARD_ACTIVE = 1
 
 # ----------------------------- Data Classes ----------------------------------
 
@@ -194,6 +203,38 @@ class Stay:
             updated_at=t[8],
         )
 
+@dataclass
+class Keycard:
+    keycard_id: int
+    status: int
+    room_id: int
+    serial: str
+    created_at: int
+    updated_at: int
+
+    def pack(self) -> bytes:
+        raw = KEYCARD_STRUCT.pack(
+            self.keycard_id,
+            self.status,
+            self.room_id,
+            fix_bytes(self.serial, 10),
+            self.created_at,
+            self.updated_at,
+        )
+        return raw.ljust(KEYCARD_SIZE, b"\x00")
+
+    @staticmethod
+    def unpack(buf: bytes) -> "Keycard":
+        t = KEYCARD_STRUCT.unpack(buf[:KEYCARD_STRUCT.size])
+        return Keycard(
+            keycard_id=t[0],
+            status=t[1],
+            room_id=t[2],
+            serial=read_str(t[3]),
+            created_at=t[4],
+            updated_at=t[5],
+        )
+
 # ----------------------------- Binary Stores ---------------------------------
 
 class FixedStore:
@@ -265,6 +306,11 @@ class StayStore(FixedStore):
     def __init__(self, path: str):
         super().__init__(path, STAY_SIZE)
 
+class KeycardStore(FixedStore):
+    cls = Keycard
+    def __init__(self, path: str):
+        super().__init__(path, KEYCARD_SIZE)
+
 # ----------------------------- Domain Services --------------------------------
 
 class HotelService:
@@ -272,6 +318,7 @@ class HotelService:
         self.rooms = RoomStore(os.path.join(DATA_DIR, "rooms.dat"))
         self.guests = GuestStore(os.path.join(DATA_DIR, "guests.dat"))
         self.stays = StayStore(os.path.join(DATA_DIR, "stays.dat"))
+        self.keycards = KeycardStore(os.path.join(DATA_DIR, "keycards.dat"))
 
     # ---- Helpers ----
     def _next_id(self, store: FixedStore, attr: str) -> int:
@@ -375,6 +422,12 @@ class HotelService:
             updated_at=now_ts(),
         )
         self.stays.append(stay)
+        
+        # Create keycard records for the issued cards
+        for i in range(cards_issued):
+            serial = f"KC{room_id:03d}{guest_id:03d}{now_ts() % 10000:04d}{i+1:02d}"
+            self.add_keycard(room_id, serial)
+        
         room.status = ROOM_ACTIVE_OCCUPIED
         room.updated_at = now_ts()
         self.rooms.update(r_idx, room)
@@ -389,6 +442,13 @@ class HotelService:
         st.cards_returned = max(st.cards_returned, st.cards_issued)
         st.updated_at = now_ts()
         self.stays.update(idx, st)
+        
+        # Mark keycards as returned (soft delete)
+        room_keycards = self.get_keycards_by_room(st.room_id)
+        for keycard in room_keycards:
+            if keycard.status == KEYCARD_ACTIVE:
+                self.delete_keycard(keycard.keycard_id)
+        
         # free room
         rp = self.rooms.find_first(lambda r: r.room_id == st.room_id)
         if rp:
@@ -407,6 +467,49 @@ class HotelService:
         st.updated_at = now_ts()
         self.stays.update(idx, st)
         return True
+
+    # ---- CRUD Keycards ----
+    def add_keycard(self, room_id: int, serial: str) -> Keycard:
+        keycard = Keycard(
+            keycard_id=self._next_id(self.keycards, "keycard_id"),
+            status=KEYCARD_ACTIVE,
+            room_id=room_id,
+            serial=serial,
+            created_at=now_ts(),
+            updated_at=now_ts(),
+        )
+        self.keycards.append(keycard)
+        return keycard
+
+    def update_keycard(self, keycard_id: int, **fields) -> Optional[Keycard]:
+        pos = self.keycards.find_first(lambda k: k.keycard_id == keycard_id)
+        if not pos: return None
+        idx, k = pos
+        for key, val in fields.items():
+            if hasattr(k, key) and key not in ("keycard_id", "created_at"):
+                setattr(k, key, val)
+        k.updated_at = now_ts()
+        self.keycards.update(idx, k)
+        return k
+
+    def delete_keycard(self, keycard_id: int) -> bool:
+        pos = self.keycards.find_first(lambda k: k.keycard_id == keycard_id)
+        if not pos: return False
+        idx, k = pos
+        k.status = KEYCARD_DELETED
+        k.updated_at = now_ts()
+        self.keycards.update(idx, k)
+        return True
+
+    def get_keycards(self, include_deleted=False) -> List[Keycard]:
+        res = []
+        for _, k in self.keycards.iter():
+            if include_deleted or k.status != KEYCARD_DELETED:
+                res.append(k)
+        return res
+
+    def get_keycards_by_room(self, room_id: int) -> List[Keycard]:
+        return [k for k in self.get_keycards() if k.room_id == room_id]
 
     # ---- Queries for View/Report ----
     def get_rooms(self, include_deleted=False) -> List[Room]:
@@ -444,34 +547,46 @@ class Report:
         return ch * width
 
     def _rooms_table(self, rooms: List[Room]) -> str:
-        # columns with guest info and check-in date
-        cols = ["RoomID","Type","Floor","Capacity","MaxCards","Status","Guest","Check-in"]
-        widths = [8,10,7,9,9,10,30,12]
+        # columns with guest info, phone, ID, and keycard serials
+        cols = ["RoomID","Type","Floor","Capacity","MaxCards","Status","Guest","Phone","ID Number","Keycard Serials","Check-in"]
+        widths = [8,10,7,9,9,10,25,15,15,20,12]
         def row(vals):
             return " | ".join(str(v).ljust(w) for v,w in zip(vals, widths))
         header = " | ".join(c.ljust(w) for c,w in zip(cols, widths))
-        line = "-" * (sum(widths) + 3*(len(widths)-1))
+        # Calculate line length to match actual table width
+        line = "-" * len(header)
         out = [header, line]
         
         # Get active stays for guest info
         stays = {s.room_id: s for s in self.svc.get_stays() if s.status == STAY_OPEN}
         # Get guests for name lookup
         guests = {g.guest_id: g for g in self.svc.get_guests()}
+        # Get keycards for serial lookup
+        keycards = {k.room_id: [kc for kc in self.svc.get_keycards() if kc.room_id == k.room_id] for k in self.svc.get_keycards()}
         
         for r in rooms:
             status = "Deleted" if r.status==ROOM_DELETED else ("Occupied" if r.status==ROOM_ACTIVE_OCCUPIED else "Active")
             # Get guest info if room is occupied
             guest_name = "-"
+            guest_phone = "-"
+            guest_id = "-"
+            keycard_serials = "-"
             checkin_date = "-"
             if r.status == ROOM_ACTIVE_OCCUPIED and r.room_id in stays:
                 stay = stays[r.room_id]
                 if stay.guest_id in guests:
-                    guest_name = guests[stay.guest_id].full_name
+                    guest = guests[stay.guest_id]
+                    guest_name = guest.full_name
+                    guest_phone = guest.phone
+                    guest_id = guest.id_no
                     checkin_date = stay.checkin_date
+                    # Get keycard serials for this room
+                    if r.room_id in keycards:
+                        keycard_serials = ", ".join([k.serial for k in keycards[r.room_id]])
             
             out.append(row([
                 r.room_id, r.room_type, r.floor, r.capacity, 
-                r.max_cards, status, guest_name, checkin_date
+                r.max_cards, status, guest_name, guest_phone, guest_id, keycard_serials, checkin_date
             ]))
         return "\n".join(out)
 
@@ -561,7 +676,7 @@ class CLI:
 
     # ----------------- Add -----------------
     def menu_add(self):
-        print("\nAdd: 1) Room  2) Guest  3) Stay(Check-in)")
+        print("\nAdd: 1) Room  2) Guest  3) Stay(Check-in)  4) Keycard")
         c = input("Select: ").strip()
         if c == "1":
             # Show existing rooms
@@ -658,14 +773,39 @@ class CLI:
             if st:
                 print(f"Check-in successful: StayID={st.stay_id}")
                 print(f"Room {rid} status changed to 'Occupied'")
+                # Show issued keycard serials
+                room_keycards = self.svc.get_keycards_by_room(rid)
+                if room_keycards:
+                    print(f"Issued keycard serials: {', '.join([k.serial for k in room_keycards])}")
             else:
                 print("Check-in failed (verify Guest/Room/Status/MaxCards)")
+                
+        elif c == "4":
+            # Add new keycard
+            print("\n=== Add New Keycard ===")
+            # Show existing rooms
+            rooms = self.svc.get_rooms(include_deleted=False)
+            if rooms:
+                headers = ["ID", "Type", "Floor", "Capacity", "Max Cards", "Status"]
+                rows = [self._format_room_row(r) for r in rooms]
+                print(self._format_table(headers, rows))
+            else:
+                print("No rooms in the system yet")
+                return
+                
+            room_id = self.input_int("Room ID")
+            serial = input("Serial Number: ").strip()[:10]
+            if not serial:
+                print("Serial number is required")
+                return
+            keycard = self.svc.add_keycard(room_id, serial)
+            print(f"Keycard added: {keycard}")
         else:
             print("Return to main menu")
 
     # ----------------- Update -----------------
     def menu_update(self):
-        print("\nUpdate: 1) Room  2) Guest  3) Stay(Check-out)")
+        print("\nUpdate: 1) Room  2) Guest  3) Stay(Check-out)  4) Keycard")
         c = input("Select: ").strip()
         if c == "1":
             # Show all rooms
@@ -763,8 +903,8 @@ class CLI:
         elif c == "3":
             # Show stays that haven't checked out yet
             print("\nStays not yet checked out:")
-            print("Stay ID | Room | Guest | Check-in Date")
-            print("-" * 70)
+            print("Stay ID | Room | Guest | Phone | ID Number | Keycard Serials | Check-in Date")
+            print("-" * 120)
             
             stays = [s for s in self.svc.get_stays() if s.status == STAY_OPEN]
             guests = {g.guest_id: g for g in self.svc.get_guests()}
@@ -772,9 +912,14 @@ class CLI:
             
             for s in stays:
                 guest_name = guests[s.guest_id].full_name if s.guest_id in guests else "Unknown"
+                guest_phone = guests[s.guest_id].phone if s.guest_id in guests else "N/A"
+                guest_id = guests[s.guest_id].id_no if s.guest_id in guests else "N/A"
                 room_type = rooms[s.room_id].room_type if s.room_id in rooms else "Unknown"
-                print(f"{s.stay_id} | {room_type} (Room {s.room_id}) | {guest_name} | {s.checkin_date}")
-            print("-" * 70)
+                # Get keycard serials for this room
+                room_keycards = self.svc.get_keycards_by_room(s.room_id)
+                keycard_serials = ", ".join([k.serial for k in room_keycards]) if room_keycards else "N/A"
+                print(f"{s.stay_id} | {room_type} (Room {s.room_id}) | {guest_name} | {guest_phone} | {guest_id} | {keycard_serials} | {s.checkin_date}")
+            print("-" * 120)
 
             # Get ID for check-out
             sid = self.input_int("\nSelect Stay ID for check-out")
@@ -793,7 +938,13 @@ class CLI:
             print(f"\nStay Information:")
             print(f"Room: {room_type} (Room {stay.room_id})")
             print(f"Guest: {guest_name}")
+            print(f"Phone: {guests[stay.guest_id].phone if stay.guest_id in guests else 'N/A'}")
+            print(f"ID Number: {guests[stay.guest_id].id_no if stay.guest_id in guests else 'N/A'}")
             print(f"Check-in date: {stay.checkin_date}")
+            # Show keycard serials
+            room_keycards = self.svc.get_keycards_by_room(stay.room_id)
+            if room_keycards:
+                print(f"Keycard serials: {', '.join([k.serial for k in room_keycards])}")
             
             confirm = input("\nConfirm check-out (y/N): ").strip().lower()
             if confirm != 'y':
@@ -807,12 +958,54 @@ class CLI:
             else:
                 print("Error during check-out")
 
+        elif c == "4":
+            # Update keycard
+            print("\n=== Update Keycard ===")
+            # Show all keycards
+            keycards = self.svc.get_keycards()
+            if keycards:
+                headers = ["Keycard ID", "Room ID", "Serial", "Status"]
+                rows = []
+                for k in keycards:
+                    status = "Active" if k.status == KEYCARD_ACTIVE else "Deleted"
+                    rows.append([str(k.keycard_id), str(k.room_id), k.serial, status])
+                print(self._format_table(headers, rows))
+            else:
+                print("No keycards in the system")
+                return
+                
+            keycard_id = self.input_int("Keycard ID to update")
+            current = self.svc.keycards.find_first(lambda k: k.keycard_id == keycard_id)
+            if not current:
+                print("Keycard not found")
+                return
+            _, keycard = current
+            print(f"\nCurrent Information:")
+            print(f"Room ID: {keycard.room_id}")
+            print(f"Serial: {keycard.serial}")
+            
+            print("\nEnter new information (leave blank to keep current):")
+            new_room = input("New Room ID: ").strip()
+            new_serial = input("New Serial: ").strip()
+            fields = {}
+            if new_room.isdigit():
+                fields["room_id"] = int(new_room)
+            if new_serial:
+                fields["serial"] = new_serial[:10]
+            if fields:
+                updated = self.svc.update_keycard(keycard_id, **fields)
+                if updated:
+                    print("Keycard updated successfully")
+                else:
+                    print("Error updating keycard")
+            else:
+                print("No changes made")
         else:
             print("Return to main menu")
 
     # ----------------- Delete -----------------
     def menu_delete(self):
-        print("\nDelete (soft): 1) Room  2) Guest  3) Stay")
+        print("\nDelete (soft): 1) Room  2) Guest  3) Stay  4) Keycard")
         c = input("Select: ").strip()
         if c == "1":
             rid = self.input_int("Room ID")
@@ -826,6 +1019,24 @@ class CLI:
             sid = self.input_int("Stay ID")
             ok = self.svc.delete_stay(sid)
             print("Deleted" if ok else "Stay not found")
+        elif c == "4":
+            # Show all keycards first
+            keycards = self.svc.get_keycards()
+            if keycards:
+                headers = ["Keycard ID", "Room ID", "Serial", "Status"]
+                rows = []
+                for k in keycards:
+                    status = "Active" if k.status == KEYCARD_ACTIVE else "Deleted"
+                    rows.append([str(k.keycard_id), str(k.room_id), k.serial, status])
+                print("\nAll Keycards:")
+                print(self._format_table(headers, rows))
+            else:
+                print("No keycards in the system")
+                return
+                
+            keycard_id = self.input_int("Keycard ID to delete")
+            ok = self.svc.delete_keycard(keycard_id)
+            print("Deleted" if ok else "Keycard not found")
         else:
             print("Return to main menu")
 
@@ -893,6 +1104,7 @@ class CLI:
           2) View All Records
           3) View Filtered Records
           4) Summary Statistics + Export Report
+          5) View Keycards
         """))
         c = input("Select: ").strip()
         if c == "1":
@@ -992,6 +1204,57 @@ class CLI:
             print(f"Export successful → {path}")
             print("\nReport header preview:\n")
             print(rep.build_text().split("\n", 8)[0:8])
+        elif c == "5":
+            # View keycards
+            print("\nKeycard View: 1) All Keycards  2) By Room  3) By Status")
+            sub = input("Select: ").strip()
+            if sub == "1":
+                keycards = self.svc.get_keycards()
+                if keycards:
+                    headers = ["Keycard ID", "Room ID", "Serial", "Status", "Created"]
+                    rows = []
+                    for k in keycards:
+                        status = "Active" if k.status == KEYCARD_ACTIVE else "Deleted"
+                        created = fmt_date(k.created_at)
+                        rows.append([str(k.keycard_id), str(k.room_id), k.serial, status, created])
+                    print("\nAll Keycards:")
+                    print(self._format_table(headers, rows))
+                else:
+                    print("No keycards in the system")
+            elif sub == "2":
+                room_id = self.input_int("Room ID")
+                room_keycards = self.svc.get_keycards_by_room(room_id)
+                if room_keycards:
+                    headers = ["Keycard ID", "Serial", "Status", "Created"]
+                    rows = []
+                    for k in room_keycards:
+                        status = "Active" if k.status == KEYCARD_ACTIVE else "Deleted"
+                        created = fmt_date(k.created_at)
+                        rows.append([str(k.keycard_id), k.serial, status, created])
+                    print(f"\nKeycards for Room {room_id}:")
+                    print(self._format_table(headers, rows))
+                else:
+                    print(f"No keycards found for Room {room_id}")
+            elif sub == "3":
+                status_filter = input("Status (1=Active, 0=Deleted): ").strip()
+                if status_filter in ["0", "1"]:
+                    status_val = int(status_filter)
+                    keycards = [k for k in self.svc.get_keycards() if k.status == status_val]
+                    if keycards:
+                        headers = ["Keycard ID", "Room ID", "Serial", "Status", "Created"]
+                        rows = []
+                        for k in keycards:
+                            status = "Active" if k.status == KEYCARD_ACTIVE else "Deleted"
+                            created = fmt_date(k.created_at)
+                            rows.append([str(k.keycard_id), str(k.room_id), k.serial, status, created])
+                        print(f"\nKeycards with status {status_val}:")
+                        print(self._format_table(headers, rows))
+                    else:
+                        print(f"No keycards found with status {status_val}")
+                else:
+                    print("Invalid status filter")
+            else:
+                print("Return to main menu")
         else:
             print("Return to main menu")
 
