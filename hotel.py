@@ -303,7 +303,7 @@ class GuestStore(FixedStore):
 
 class StayStore(FixedStore):
     cls = Stay
-    def __init__(self, path: str):
+    def __init__(self, path: str):  
         super().__init__(path, STAY_SIZE)
 
 class KeycardStore(FixedStore):
@@ -437,17 +437,27 @@ class HotelService:
         pos = self.stays.find_first(lambda s: s.stay_id == stay_id and s.status == STAY_OPEN)
         if not pos: return False
         idx, st = pos
+        
+        # Get stay created time for keycard filtering
+        stay_created_time = st.updated_at
+        
         st.status = STAY_CLOSED
         st.checkout_date = date_str
-        st.cards_returned = max(st.cards_returned, st.cards_issued)
+        st.cards_returned = st.cards_issued  # Mark all cards as returned
         st.updated_at = now_ts()
         self.stays.update(idx, st)
         
-        # Mark keycards as returned (soft delete)
+        # Mark keycards as returned (soft delete) - only those created for this stay
+        # We mark keycards created around the same time as this stay
         room_keycards = self.get_keycards_by_room(st.room_id)
+        deleted_count = 0
         for keycard in room_keycards:
-            if keycard.status == KEYCARD_ACTIVE:
+            # Only delete active keycards created for this stay (within reasonable time window)
+            if keycard.status == KEYCARD_ACTIVE and abs(keycard.created_at - stay_created_time) < 300:
                 self.delete_keycard(keycard.keycard_id)
+                deleted_count += 1
+                if deleted_count >= st.cards_issued:
+                    break
         
         # free room
         rp = self.rooms.find_first(lambda r: r.room_id == st.room_id)
@@ -580,9 +590,10 @@ class Report:
                     guest_phone = guest.phone
                     guest_id = guest.id_no
                     checkin_date = stay.checkin_date
-                    # Get keycard serials for this room
+                    # Get keycard serials for this room (only active ones)
                     if r.room_id in keycards:
-                        keycard_serials = ", ".join([k.serial for k in keycards[r.room_id]])
+                        active_keycards = [k for k in keycards[r.room_id] if k.status == KEYCARD_ACTIVE]
+                        keycard_serials = ", ".join([k.serial for k in active_keycards]) if active_keycards else "-"
             
             out.append(row([
                 r.room_id, r.room_type, r.floor, r.capacity, 
@@ -773,10 +784,12 @@ class CLI:
             if st:
                 print(f"Check-in successful: StayID={st.stay_id}")
                 print(f"Room {rid} status changed to 'Occupied'")
-                # Show issued keycard serials
+                # Show issued keycard serials (get the latest ones)
                 room_keycards = self.svc.get_keycards_by_room(rid)
                 if room_keycards:
-                    print(f"Issued keycard serials: {', '.join([k.serial for k in room_keycards])}")
+                    # Sort by created_at descending and take the latest 'cards' number
+                    recent_keycards = sorted(room_keycards, key=lambda k: k.created_at, reverse=True)[:cards]
+                    print(f"Issued keycard serials: {', '.join([k.serial for k in recent_keycards])}")
             else:
                 print("Check-in failed (verify Guest/Room/Status/MaxCards)")
                 
@@ -915,8 +928,8 @@ class CLI:
                 guest_phone = guests[s.guest_id].phone if s.guest_id in guests else "N/A"
                 guest_id = guests[s.guest_id].id_no if s.guest_id in guests else "N/A"
                 room_type = rooms[s.room_id].room_type if s.room_id in rooms else "Unknown"
-                # Get keycard serials for this room
-                room_keycards = self.svc.get_keycards_by_room(s.room_id)
+                # Get keycard serials for this room (only active ones)
+                room_keycards = [k for k in self.svc.get_keycards_by_room(s.room_id) if k.status == KEYCARD_ACTIVE]
                 keycard_serials = ", ".join([k.serial for k in room_keycards]) if room_keycards else "N/A"
                 print(f"{s.stay_id} | {room_type} (Room {s.room_id}) | {guest_name} | {guest_phone} | {guest_id} | {keycard_serials} | {s.checkin_date}")
             print("-" * 120)
@@ -941,10 +954,12 @@ class CLI:
             print(f"Phone: {guests[stay.guest_id].phone if stay.guest_id in guests else 'N/A'}")
             print(f"ID Number: {guests[stay.guest_id].id_no if stay.guest_id in guests else 'N/A'}")
             print(f"Check-in date: {stay.checkin_date}")
-            # Show keycard serials
-            room_keycards = self.svc.get_keycards_by_room(stay.room_id)
+            # Show keycard serials (only active ones)
+            room_keycards = [k for k in self.svc.get_keycards_by_room(stay.room_id) if k.status == KEYCARD_ACTIVE]
             if room_keycards:
                 print(f"Keycard serials: {', '.join([k.serial for k in room_keycards])}")
+            else:
+                print(f"Keycard serials: (none active)")
             
             confirm = input("\nConfirm check-out (y/N): ").strip().lower()
             if confirm != 'y':
@@ -1042,22 +1057,32 @@ class CLI:
 
     # ----------------- View -----------------
     def _format_table(self, headers: List[str], rows: List[List[str]], widths: Optional[List[int]] = None) -> str:
+        if not rows:
+            # Handle empty rows
+            widths = [len(h) + 2 for h in headers]
+            header = " | ".join(str(h).ljust(w) for h, w in zip(headers, widths))
+            separator = "-" * (sum(widths) + 3 * (len(widths) - 1))
+            return "\n".join([header, separator])
+        
         if not widths:
             # Calculate column widths based on content
             widths = []
             for i in range(len(headers)):
-                col_items = [str(row[i]) for row in rows] + [headers[i]]
+                col_items = [headers[i]]
+                for row in rows:
+                    if i < len(row):
+                        col_items.append(str(row[i]))
                 widths.append(max(len(item) for item in col_items) + 2)
         
         # Create header
         header = " | ".join(str(h).ljust(w) for h, w in zip(headers, widths))
         separator = "-" * (sum(widths) + 3 * (len(widths) - 1))
         
-        # Create rows
-        formatted_rows = [
-            " | ".join(str(cell).ljust(w) for cell, w in zip(row, widths))
-            for row in rows
-        ]
+        # Create rows (pad short rows with empty strings)
+        formatted_rows = []
+        for row in rows:
+            padded_row = row + [""] * (len(headers) - len(row))
+            formatted_rows.append(" | ".join(str(cell).ljust(w) for cell, w in zip(padded_row, widths)))
         
         return "\n".join([header, separator] + formatted_rows)
 
@@ -1203,7 +1228,8 @@ class CLI:
             rep.save(path)
             print(f"Export successful → {path}")
             print("\nReport header preview:\n")
-            print(rep.build_text().split("\n", 8)[0:8])
+            preview_lines = rep.build_text().split("\n")[:8]
+            print("\n".join(preview_lines))
         elif c == "5":
             # View keycards
             print("\nKeycard View: 1) All Keycards  2) By Room  3) By Status")
